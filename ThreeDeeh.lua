@@ -157,6 +157,30 @@ local function copyTbl(tbl)
     for k,v in pairs(tbl) do output[k] = tbl[k] end
     return setmetatable(output,getmetatable(tbl))
 end
+local tonumberifier = function(str,w)
+    local numbers = {}
+    for c,c2 in str:gmatch("[^% ]+") do
+        if w then table.insert(numbers,{tonumber(c)})
+        else table.insert(numbers,tonumber(c)) end
+    end
+    if w then numbers[4] = {1} end
+    return numbers
+end
+local tonumberifierTex = function(str,w)
+    local numbers = {}
+    local tex = {}
+    for c,texs in str:gmatch("(%d+)/(%d+)") do
+        if w then
+            table.insert(numbers,{tonumber(c)})
+            table.insert(tex,tonumber({texs}))
+        else
+            table.insert(numbers,tonumber(c))
+            table.insert(tex,tonumber(texs))
+        end
+    end
+    if w then numbers[4] = {1} end
+    return numbers,tex
+end
 local function drawLine(startX, startY, endX, endY, wdata, ZBUFFER, color, object)
 	local drawPixelInternal = function(x,y)
         local wUnFloorCur = interpolateOnLine(
@@ -464,7 +488,7 @@ local function proccesTriangleData(ZBUFFER,objects,arguments)
             v1.w,v2.w,v3.w = vm.origins[v[1]][4][1],vm.origins[v[2]][4][1],vm.origins[v[3]][4][1]
             if ((v2:cross(v3)):dot(v1) >= 0) or not arguments.doCulling then
                 if arguments.drawTriangles then
-                    proccesSolidTriangle(ZBUFFER,v1,v2,v3,vm.main.color[k],vm)
+                    proccesSolidTriangle(ZBUFFER,v1,v2,v3,v[4] or vm.main.color[k],vm)
                 end
                 if arguments.drawWireFrame then
                     local wVecs1 = {
@@ -479,9 +503,9 @@ local function proccesTriangleData(ZBUFFER,objects,arguments)
                         vector.new(vm.vectors[v[3]][1][1],vm.vectors[v[3]][2][1],vm.vectors[v[3]][4][1]),
                         vector.new(vm.vectors[v[1]][1][1],vm.vectors[v[1]][2][1],vm.vectors[v[1]][4][1])
                     }
-                    drawLine(vm.vectors[v[1]][1][1],vm.vectors[v[1]][2][1],vm.vectors[v[2]][1][1],vm.vectors[v[2]][2][1],wVecs1,ZBUFFER,vm.main.color[k],vm)
-                    drawLine(vm.vectors[v[2]][1][1],vm.vectors[v[2]][2][1],vm.vectors[v[3]][1][1],vm.vectors[v[3]][2][1],wVecs2,ZBUFFER,vm.main.color[k],vm)
-                    drawLine(vm.vectors[v[3]][1][1],vm.vectors[v[3]][2][1],vm.vectors[v[1]][1][1],vm.vectors[v[1]][2][1],wVecs3,ZBUFFER,vm.main.color[k],vm)
+                    drawLine(vm.vectors[v[1]][1][1],vm.vectors[v[1]][2][1],vm.vectors[v[2]][1][1],vm.vectors[v[2]][2][1],wVecs1,ZBUFFER,v[4] or vm.main.color[k],vm)
+                    drawLine(vm.vectors[v[2]][1][1],vm.vectors[v[2]][2][1],vm.vectors[v[3]][1][1],vm.vectors[v[3]][2][1],wVecs2,ZBUFFER,v[4] or vm.main.color[k],vm)
+                    drawLine(vm.vectors[v[3]][1][1],vm.vectors[v[3]][2][1],vm.vectors[v[1]][1][1],vm.vectors[v[1]][2][1],wVecs3,ZBUFFER,v[4] or vm.main.color[k],vm)
                 end
             end
         end
@@ -570,6 +594,7 @@ local function newSquare()
         rot = vector.new(0,0,0),
         color = createColor(),
         indexList = {1},
+        texture={},
         vertices = {
             {{-0.5}, {-0.5}, {0}, {1}},
             {{0.5}, {-0.5}, {0}, {1}}, 
@@ -592,6 +617,7 @@ local function newCube()
         rot = vector.new(0,0,0),
         color = createColor(),
 		indexList = {1},
+        texture={},
         vertices = {
 			{ { -0.5}, { -0.5}, {0.5}, {1} },  
 			{ {0.5}, { -0.5}, {0.5}, {1} },
@@ -626,6 +652,7 @@ local function newPyramid()
         rot = vector.new(0,0,0),
         color = createColor(),
         indexList = {1},
+        texture={},
         vertices = {
 			{{-0.5}, {-0.5}, {-0.5}, {1}},
 			{{0.5}, {-0.5}, {-0.5}, {1}},
@@ -652,6 +679,7 @@ local function newIcosahedron()
         color = createColor(),
         indexList = {1},
         divider = 30,
+        texture={},
         vertices = {
             {{0},{30},{0},{1}},
             {{26},{15},{0},{1}},
@@ -691,6 +719,46 @@ local function newIcosahedron()
     }
     return objData
 end
+local function loadObj(filename,divider)
+    if filename:match("/?.+%.(.-)$") == "obj" then
+        local file = fs.open(filename,"r")
+        local objData = file.readAll()
+        local vectors = {}
+        local connections = {}
+        local texture = {}
+        local vectorSplitter = function(c)
+            local str = c:gsub("v ","")
+            table.insert(vectors,tonumberifier(str,true))
+        end
+        local connectionSplitter = function(c)
+            local str = c:gsub("f ","")
+            if not c:match("/") then
+                table.insert(connections,tonumberifier(str))
+            else
+                local con,tex = tonumberifierTex(str)
+                table.insert(connections,con)
+                table.insert(texture,tex)
+            end
+        end
+        objData:gsub("v [^\n]+",vectorSplitter)
+        objData:gsub("f [^\n]+",connectionSplitter)
+        local flippedCons = {}
+        for k,v in ipairs(connections) do flippedCons[k] = {v[3],v[2],v[1]} end
+        file.close()
+        return {
+            scale = vector.new(1,1,1),
+            loc = vector.new(0,0,0),
+            rot = vector.new(0,0,0),
+            color = createColor(),
+            divider = divider,
+            indexList = {1},
+            texture=texture,
+            vertices = vectors,
+            connections = flippedCons,
+        }
+    end
+end
+
 return {
     transform = transform,
     proccesTriangleData = proccesTriangleData,
@@ -699,6 +767,7 @@ return {
         newCube = newCube,
         newPyramid = newPyramid,
         newIcosahedron = newIcosahedron,
+        loadObj=loadObj,
     },
     events = {},
     tools = {
