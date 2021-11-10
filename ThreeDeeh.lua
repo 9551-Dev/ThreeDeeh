@@ -763,11 +763,11 @@ return {
     transform = transform,
     proccesTriangleData = proccesTriangleData,
     objects = {
+	loadObj=loadObj,
         newSquare = newSquare,
         newCube = newCube,
         newPyramid = newPyramid,
         newIcosahedron = newIcosahedron,
-        loadObj=loadObj,
     },
     events = {},
     tools = {
