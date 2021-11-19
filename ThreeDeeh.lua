@@ -159,27 +159,65 @@ local function copyTbl(tbl)
 end
 local tonumberifier = function(str,w)
     local numbers = {}
-    for c,c2 in str:gmatch("[^% ]+") do
-        if w then table.insert(numbers,{tonumber(c)})
-        else table.insert(numbers,tonumber(c)) end
+    for vec in str:gmatch("[^% ]+") do
+        table.insert(numbers,tonumber(vec))
     end
-    if w then numbers[4] = {1} end
     return numbers
+end
+local tonumberifierVectors = function(str,w)
+    local numbers = {}
+    for vec in str:gmatch("[^% ]+") do
+        if w then table.insert(numbers,{tonumber(vec)})
+        else table.insert(numbers,tonumber(vec)) end
+    end
+    local rgb = numbers[6] and {numbers[4],numbers[5],numbers[6]}
+    numbers[4],numbers[5],numbers[6] = nil
+    if w then numbers[4] = {1} end
+    return numbers,rgb
 end
 local tonumberifierTex = function(str,w)
     local numbers = {}
-    local tex = {}
-    for c,texs in str:gmatch("(%d+)/(%d+)") do
-        if w then
-            table.insert(numbers,{tonumber(c)})
-            table.insert(tex,tonumber({texs}))
-        else
-            table.insert(numbers,tonumber(c))
-            table.insert(tex,tonumber(texs))
-        end
+    local textures = {}
+    for vec,tex in str:gmatch("(%d+)/(%d+)") do
+        if w then table.insert(numbers,{tonumber(vec)})
+        else table.insert(numbers,tonumber(vec)) end
+        table.insert(textures,tonumber(tex))
     end
     if w then numbers[4] = {1} end
-    return numbers,tex
+    return numbers,textures
+end
+local tonumberifierTexNorms = function(str,w)
+    local numbers = {}
+    local textures = {}
+    local normals = {}
+    for vec,tex,norm in str:gmatch("(%d+)/(%d+)/(%d+)") do
+        if w then table.insert(numbers,{tonumber(vec)})
+        else table.insert(numbers,tonumber(vec)) end
+        table.insert(textures,tonumber(tex))
+        table.insert(normals,tonumber(norm))
+    end
+    if w then numbers[4] = {1} end
+    return numbers,textures,normals
+end
+local tonumberifierNorms = function(str,w)
+    local numbers = {}
+    local normals = {}
+    for vec,norm in str:gmatch("(%d+)//(%d+)") do
+        if w then table.insert(numbers,{tonumber(vec)})
+        else table.insert(numbers,tonumber(vec)) end
+        table.insert(normals,tonumber(norm))
+    end
+    if w then numbers[4] = {1} end
+    return numbers,normals
+end
+local tonumberifierVTTex = function(str)
+    local numbers = {}
+    for vec in str:gmatch("[^% ]+") do
+        table.insert(numbers,tonumber(vec))
+    end
+    numbers[2] = numbers[2] or 0
+    numbers[3] = numbers[3] or 0
+    return numbers
 end
 local function drawLine(startX, startY, endX, endY, wdata, ZBUFFER, color, object)
 	local drawPixelInternal = function(x,y)
@@ -188,17 +226,14 @@ local function drawLine(startX, startY, endX, endY, wdata, ZBUFFER, color, objec
             wdata[2].x,wdata[2].y,wdata[2].z,
             x,y
         )
-        if not ZBUFFER[x][y] then ZBUFFER[x][y] = {w=math.huge} end
-        if wUnFloorCur < ZBUFFER[x][y].w or ZBUFFER[x][y].w == math.huge then
-            ZBUFFER[x][y] = {
-                color=toBlit[color],
-                w=wUnFloorCur,
-                zet="LINE",
-                cSym=nil,
-                cCo=nil,
-                objectPointer=object
-            }
-        end
+        ZBUFFER[x][y] = {
+            color=toBlit[color],
+            w=wUnFloorCur,
+            zet="LINE",
+            cSym=nil,
+            cCol=nil,
+            objectPointer=object
+        }
     end
     local startX,startY,endX,endY = math.floor(startX),math.floor(startY),math.floor(endX),math.floor(endY)
     if startX == endX and startY == endY then drawPixelInternal(startX, startY) return end
@@ -231,21 +266,22 @@ local function drawFlatTriangle(ZBUFFER,px1,px2,y,color,v1,v2,v3,inV1,inV2,inV3,
     local z2 = lerp(inV1.z,inV3.z,t2)
     for x = xStart, xEnd do
         if y > 0 and x > 0 then
+            _G.values = {x,xStart,xEnd}
             local t3 = (x - sxStart) / (sxEnd - sxStart)
             local wUnFloorCur = lerp(w1,w2,t3)
             local z = lerp(z1,z2,t3)
-            if tostring(wUnFloorCur) == "nan" then error("nan'! "..tostring(inV1).." "..tostring(inV3).." "..tostring(sxEnd).." "..tostring(y)) end
-            if not ZBUFFER[x][y] then ZBUFFER[x][y] = {w=math.huge} end
-            if wUnFloorCur < ZBUFFER[x][y].w then
-                ZBUFFER[x][y] = {
-                    color=toBlit[color],
-                    w=wUnFloorCur,
-                    zet=z,
-                    --cSym=tostring(math.abs(math.floor(wUnFloorCur%10))),
-                    cSym=nil,
-                    cCol = nil,
-                    objectPointer=object
-                }
+            if not tostring(wUnFloorCur) == "nan" then
+                if not ZBUFFER[x][y] then ZBUFFER[x][y] = {w=math.huge} end
+                if wUnFloorCur < ZBUFFER[x][y].w then
+                    ZBUFFER[x][y] = {
+                        color=toBlit[color],
+                        w=wUnFloorCur,
+                        zet=z,
+                        cSym = nil,
+                        cCol = nil,
+                        objectPointer=object
+                    }
+                end
             end
         end
     end
@@ -299,32 +335,6 @@ local function proccesSolidTriangle(ZBUFFER,vec1,vec2,vec3,color,object)
         end
     end
 end
---[[local function proccesSolidTriangle(ZBUFFER,b,a,c,tColor)
-    if a.y < b.y then a,b = b,a end
-    if a.y < c.y then a,c = c,a end
-    if b.x > c.x then b,c = c,b end
-    for y = b.y, a.y-1 do
-        local xStart = intY(a,b,y)
-        local xEnd = intY(a,c,y)
-        local p1 = vector.new(xStart,y)
-        local p2 = vector.new(xEnd,y)
-        local t1 = getT(a,b,p1)
-        local t2 = getT(a,c,p2)
-        local z1 = lerp(a.z,b.z,t1)
-        local z2 = lerp(a.z,c.z,t2)
-        for x = xStart, xEnd do
-            local t3 = (x - xStart) / (xEnd - xStart)
-            local z = math.floor(lerp(z1,z2,t3))    
-            if not ZBUFFER[x][y] then ZBUFFER[x][y] = {w=math.huge} end
-            if z > ZBUFFER[x][y].w or ZBUFFER[x][y].w == math.huge then
-                ZBUFFER[x][y] = {
-                    w=z,
-                    color=tColor
-                }
-            end
-        end
-    end
-end]]
 local function createColor(whitelist,blacklist)
     local cols,clist,cCount = {},{},0
     local acls = whitelist or {}
@@ -477,7 +487,9 @@ local function proccesTriangleData(ZBUFFER,objects,arguments)
         arguments = {
             doCulling = true,
             drawWireFrame = false,
-            drawTriangles = true
+            drawTriangles = true,
+            frontCulling = false,
+            backCulling = true
         }
     end
     for k,vm in pairs(objects) do
@@ -486,7 +498,7 @@ local function proccesTriangleData(ZBUFFER,objects,arguments)
 			local v2 = vector.new(vm.origins[v[2]][1][1],vm.origins[v[2]][2][1],vm.origins[v[2]][3][1])
 			local v3 = vector.new(vm.origins[v[3]][1][1],vm.origins[v[3]][2][1],vm.origins[v[3]][3][1])
             v1.w,v2.w,v3.w = vm.origins[v[1]][4][1],vm.origins[v[2]][4][1],vm.origins[v[3]][4][1]
-            if ((v2:cross(v3)):dot(v1) >= 0) or not arguments.doCulling then
+            local localProcces = function()
                 if arguments.drawTriangles then
                     proccesSolidTriangle(ZBUFFER,v1,v2,v3,v[4] or vm.main.color[k],vm)
                 end
@@ -506,6 +518,15 @@ local function proccesTriangleData(ZBUFFER,objects,arguments)
                     drawLine(vm.vectors[v[1]][1][1],vm.vectors[v[1]][2][1],vm.vectors[v[2]][1][1],vm.vectors[v[2]][2][1],wVecs1,ZBUFFER,v[4] or vm.main.color[k],vm)
                     drawLine(vm.vectors[v[2]][1][1],vm.vectors[v[2]][2][1],vm.vectors[v[3]][1][1],vm.vectors[v[3]][2][1],wVecs2,ZBUFFER,v[4] or vm.main.color[k],vm)
                     drawLine(vm.vectors[v[3]][1][1],vm.vectors[v[3]][2][1],vm.vectors[v[1]][1][1],vm.vectors[v[1]][2][1],wVecs3,ZBUFFER,v[4] or vm.main.color[k],vm)
+                end
+            end
+            if not arguments.frontCulling then
+                if ((v2:cross(v3)):dot(v1) >= 0) or not arguments.backCulling and arguments.doCulling then
+                    localProcces()
+                end
+            else
+                if not ((v2:cross(v3)):dot(v1) >= 0) and arguments.doCulling then
+                    localProcces()
                 end
             end
         end
@@ -595,12 +616,15 @@ local function newSquare()
         color = createColor(),
         indexList = {1},
         texture={},
+        normals={},
+        spaceVertices = {},
         vertices = {
             {{-0.5}, {-0.5}, {0}, {1}},
             {{0.5}, {-0.5}, {0}, {1}}, 
             {{-0.5},  {0.5}, {0}, {1}}, 
             {{0.5},  {0.5}, {0}, {1}},
         },
+        rgbVectors = {},
         connections = {
             {3,2,1},
             {2,4,3},
@@ -618,6 +642,8 @@ local function newCube()
         color = createColor(),
 		indexList = {1},
         texture={},
+        normals={},
+        spaceVertices = {},
         vertices = {
 			{ { -0.5}, { -0.5}, {0.5}, {1} },  
 			{ {0.5}, { -0.5}, {0.5}, {1} },
@@ -628,6 +654,7 @@ local function newCube()
 			{ { -0.5}, {0.5}, { -0.5}, {1}},
 			{ {0.5}, {0.5}, { -0.5}, {1}}
 		},
+        rgbVectors = {},
         connections = {
             { 1,3,4 },
             { 1,4,2 },
@@ -653,6 +680,8 @@ local function newPyramid()
         color = createColor(),
         indexList = {1},
         texture={},
+        normals={},
+        spaceVertices = {},
         vertices = {
 			{{-0.5}, {-0.5}, {-0.5}, {1}},
 			{{0.5}, {-0.5}, {-0.5}, {1}},
@@ -660,6 +689,7 @@ local function newPyramid()
 			{{0.5}, {-0.5}, {0.5}, {1}},
 			{{0}, {0.5}, {0}, {1}}
         },
+        rgbVectors = {},
         connections = {
             {3,2,1},
             {3,4,2},
@@ -680,6 +710,8 @@ local function newIcosahedron()
         indexList = {1},
         divider = 30,
         texture={},
+        normals={},
+        spaceVertices = {},
         vertices = {
             {{0},{30},{0},{1}},
             {{26},{15},{0},{1}},
@@ -694,6 +726,7 @@ local function newIcosahedron()
             {{21},{-15},{-15},{1}},
             {{0},{-30},{-15},{1}}
         },
+        rgbVectors = {},
         connections = {
             {1,2,3},
             {3,4,1},
@@ -720,28 +753,61 @@ local function newIcosahedron()
     return objData
 end
 local function loadObj(filename,divider)
-    if filename:match("/?.+%.(.-)$") == "obj" then
+    if filename:match("/?.+%.(.-)$") == "obj" then  
         local file = fs.open(filename,"r")
         local objData = file.readAll()
         local vectors = {}
         local connections = {}
         local texture = {}
+        local normals = {}
+        local spaceVertices = {}
+        local rgbVectors = {}
         local vectorSplitter = function(c)
             local str = c:gsub("v ","")
-            table.insert(vectors,tonumberifier(str,true))
+            local vecs,rgb = tonumberifierVectors(str,true)
+            table.insert(vectors,vecs)
+            rgbVectors[#vectors] = rgb
         end
         local connectionSplitter = function(c)
             local str = c:gsub("f ","")
-            if not c:match("/") then
-                table.insert(connections,tonumberifier(str))
+            local sCount = select(2,str:gsub("%/",function(c) return c end))
+            local ssCount = select(2,str:gsub("%/%/",function(c) return c end))
+            if ssCount == 0 then
+                if sCount == 0 then
+                    table.insert(connections,tonumberifier(str))
+                elseif sCount < 4 and sCount > 0 then
+                    local con,tex = tonumberifierTex(str)
+                    table.insert(connections,con)
+                    table.insert(texture,tex)
+                else
+                    local con,tex,norm = tonumberifierTexNorms(str)
+                    table.insert(connections,con)
+                    table.insert(texture,tex)
+                    table.insert(normals,norm)
+                end
             else
-                local con,tex = tonumberifierTex(str)
+                local con,norm = tonumberifierNorms(str)
                 table.insert(connections,con)
-                table.insert(texture,tex)
+                table.insert(normals,norm)
             end
+        end
+        local textureSplitter = function(c)
+            local tex = tonumberifierVTTex(c)
+            table.insert(texture,tex)
+        end
+        local normalsSplitter = function(c)
+            local norm = tonumberifier(c)
+            table.insert(normals,norm)
+        end
+        local spaceVerticeSplitter = function(c)
+            local spaceVert = tonumberifier(c)
+            table.inserts(spaceVertices,spaceVert)
         end
         objData:gsub("v [^\n]+",vectorSplitter)
         objData:gsub("f [^\n]+",connectionSplitter)
+        objData:gsub("vt [^\n]+",textureSplitter)
+        objData:gsub("vn [^\n]+",normalsSplitter)
+        objData:gsub("vp [^\n]+",spaceVerticeSplitter)
         local flippedCons = {}
         for k,v in ipairs(connections) do flippedCons[k] = {v[3],v[2],v[1]} end
         file.close()
@@ -752,9 +818,12 @@ local function loadObj(filename,divider)
             color = createColor(),
             divider = divider,
             indexList = {1},
-            texture=texture,
             vertices = vectors,
+            rgbVectors = rgbVectors,
             connections = flippedCons,
+            normals=normals,
+            spaceVertices = spaceVertices,
+            texture=texture,
         }
     end
 end
@@ -763,11 +832,11 @@ return {
     transform = transform,
     proccesTriangleData = proccesTriangleData,
     objects = {
-	loadObj=loadObj,
         newSquare = newSquare,
         newCube = newCube,
         newPyramid = newPyramid,
         newIcosahedron = newIcosahedron,
+        loadObj=loadObj,
     },
     events = {},
     tools = {
@@ -784,6 +853,16 @@ return {
                 interpolateY=interpolateY,
                 interpolateOnLine=interpolateOnLine
             }
+        },
+        stringProccesing={
+            tonumberifiying = {
+                tonumberifier=tonumberifier,
+                tonumberifierNorms=tonumberifierNorms,
+                tonumberifierTex=tonumberifierTex,
+                tonumberifierTexNorms=tonumberifierTexNorms,
+                tonumberifierVectors=tonumberifierVectors,
+                tonumberifierVTTex=tonumberifierVTTex
+            },
         },
     },
     createColor = createColor,
